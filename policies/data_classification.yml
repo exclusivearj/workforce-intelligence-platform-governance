@@ -1,0 +1,87 @@
+version: "1.0"
+last_updated: "2024-01-01"
+owner: "data-platform-team"
+
+sensitivity_levels:
+  public:
+    description: "Freely shareable. No access restrictions."
+    allowed_roles: ["analyst_reader", "dbt_transformer", "ingestion_writer"]
+  internal:
+    description: "Internal use only. All authenticated users."
+    allowed_roles: ["analyst_reader", "dbt_transformer"]
+  confidential:
+    description: "Role-restricted. Masked in LLM context. Logged on access."
+    allowed_roles: ["dbt_transformer", "hr_partner_role", "legal_role"]
+    llm_safe: false
+    mask_in_views: true
+  restricted:
+    description: "HR Partner and Legal only. Audit trigger on every SELECT."
+    allowed_roles: ["hr_partner_role", "legal_role"]
+    audit_trigger: true
+    llm_safe: false
+    mask_in_views: true
+
+tables:
+  analytics.dim_employees:
+    columns:
+      employee_id:        { sensitivity: public,       pii: false }
+      full_name:          { sensitivity: confidential, pii: true,  mask_with: "'***'" }
+      email:              { sensitivity: confidential, pii: true,  mask_with: "'***@***.com'" }
+      department:         { sensitivity: internal,     pii: false }
+      job_title:          { sensitivity: internal,     pii: false }
+      level:              { sensitivity: internal,     pii: false }
+      hire_date:          { sensitivity: internal,     pii: false }
+      termination_date:   { sensitivity: internal,     pii: false }
+      is_active:          { sensitivity: public,       pii: false }
+      employment_type:    { sensitivity: internal,     pii: false }
+      manager_id:         { sensitivity: confidential, pii: false, mask_with: "MD5(manager_id::text)" }
+      location:           { sensitivity: internal,     pii: false }
+      salary:             { sensitivity: restricted,   pii: true,  mask_with: "NULL" }
+      performance_rating: { sensitivity: restricted,   pii: true,  mask_with: "NULL" }
+      created_at:         { sensitivity: public,       pii: false }
+      updated_at:         { sensitivity: public,       pii: false }
+
+  analytics.fct_headcount_daily:
+    columns:
+      date:            { sensitivity: public,   pii: false }
+      department:      { sensitivity: internal, pii: false }
+      level:           { sensitivity: internal, pii: false }
+      headcount:       { sensitivity: internal, pii: false }
+      employment_type: { sensitivity: internal, pii: false }
+
+  analytics.fct_attrition_monthly:
+    columns:
+      year_month:                     { sensitivity: public,       pii: false }
+      department:                     { sensitivity: internal,     pii: false }
+      voluntary_terminations:         { sensitivity: internal,     pii: false }
+      involuntary_terminations:       { sensitivity: confidential, pii: false, mask_with: "NULL" }
+      total_terminations:             { sensitivity: internal,     pii: false }
+      avg_headcount:                  { sensitivity: internal,     pii: false }
+      attrition_rate_pct:             { sensitivity: internal,     pii: false }
+      rolling_12m_attrition_rate_pct: { sensitivity: internal,     pii: false }
+
+  analytics.rpt_recruiting_funnel:
+    columns:
+      job_id:                       { sensitivity: internal, pii: false }
+      job_title:                    { sensitivity: internal, pii: false }
+      department:                   { sensitivity: internal, pii: false }
+      applied_count:                { sensitivity: internal, pii: false }
+      hired_count:                  { sensitivity: internal, pii: false }
+      application_to_hire_days_avg: { sensitivity: internal, pii: false }
+      offer_acceptance_rate_pct:    { sensitivity: internal, pii: false }
+
+  llm.eval_results:
+    columns:
+      id:               { sensitivity: internal, pii: false }
+      question:         { sensitivity: internal, pii: false }
+      ground_truth:     { sensitivity: internal, pii: false }
+      generated_answer: { sensitivity: internal, pii: false }
+      faithfulness:     { sensitivity: internal, pii: false }
+      answer_relevancy: { sensitivity: internal, pii: false }
+
+  llm.feedback:
+    columns:
+      id:              { sensitivity: internal,     pii: false }
+      analyst_role:    { sensitivity: internal,     pii: false }
+      rating:          { sensitivity: internal,     pii: false }
+      correction_text: { sensitivity: confidential, pii: false, mask_with: "'***'" }

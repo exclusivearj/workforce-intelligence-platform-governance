@@ -1,0 +1,2 @@
+# Generated SQL artifacts (access_control.sql, masking_views.sql) land here.
+# This directory is intentionally tracked but its *.sql contents are gitignored.
