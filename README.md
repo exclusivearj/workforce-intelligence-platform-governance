@@ -1,4 +1,6 @@
-# governance — sensitive data governance layer
+![workforce-intelligence-platform-governance banner](assets/03-governance-banner.png)
+
+# workforce-intelligence-platform-governance — sensitive data governance layer
 
 Part 3 of 4 in the [workforce-intelligence-platform](../README.md).
 
