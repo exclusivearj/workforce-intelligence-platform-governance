@@ -29,6 +29,14 @@ def test_security_labels_for_pii(config):
     assert "MASKED WITH VALUE" in sql
 
 
+def test_security_labels_escape_single_quotes(config):
+    # mask_with values like '***' contain single quotes; embedded in the label
+    # string literal they must be doubled, or psql rejects the statement.
+    sql = generate_security_labels(config)
+    assert "MASKED WITH VALUE ''***''" in sql
+    assert "MASKED WITH VALUE ''***@***.com''" in sql
+
+
 def test_generated_sql_parses(config):
     sql = generate_all_ddl(config)
     statements = [s for s in sqlparse.parse(sql) if s.token_first(skip_cm=True)]

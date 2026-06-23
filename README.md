@@ -53,10 +53,48 @@ column masking, access control DDL, and audit scanning for all People Analytics 
 
 ## Setup
 
+### Prerequisites
+
+This module applies governance DDL on top of the shared data layer, so it expects:
+
+1. **Postgres is running** — `make infra-up` from the platform root.
+2. **Ingestion has been set up** — `make ingestion-setup` creates the base login roles
+   (`analyst_reader`, `dbt_transformer`, `ingestion_writer`), and `make ingestion-dbt`
+   builds the `analytics.*` / `llm.*` tables that the grants and views reference.
+
+The DB connection is read from `DATABASE_URL`, falling back to `POSTGRES_HOST` /
+`POSTGRES_PORT` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` (the same env the
+ingestion module uses). Export them — or source the platform-root `.env` — before applying.
+
+### Apply
+
 ```bash
-cd governance
-pip install -e ".[dev]"
-make setup         # loads config, generates DDL, applies to Postgres
+cd 3-governance
+make setup    # install -> bootstrap-roles -> generate-ddl -> apply-ddl
+```
+
+`make setup` runs four steps:
+
+| Step | What it does |
+|---|---|
+| `install` | `pip install -e ".[dev]"` |
+| `bootstrap-roles` | Creates the governance-owned roles `hr_partner_role` + `legal_role` (idempotent). The base roles come from ingestion; these two are introduced by the access policy, so governance owns them. |
+| `generate-ddl` | Reads `policies/data_classification.yml` and writes SQL artifacts to `generated/` (no DB needed). |
+| `apply-ddl` | Applies `audit_setup.sql`, `access_control.sql`, and `masking_views.sql` with `ON_ERROR_STOP=1`, so a failed statement fails the target instead of being silently swallowed. |
+
+Run `make help` for the full target list.
+
+### Column-level SECURITY LABELs (optional)
+
+`generate-ddl` also writes `generated/security_labels.sql`, which tags PII columns for the
+[PostgreSQL Anonymizer](https://postgresql-anonymizer.readthedocs.io/) (`anon`) extension.
+That extension is **not** part of the shared `pgvector/pgvector:pg16` image, so the labels
+are kept out of `apply-ddl` (which must stay green on a stock database). To apply them:
+
+```bash
+# once, on a Postgres image that ships the anon extension:
+psql "$DATABASE_URL" -c "CREATE EXTENSION anon;"
+make apply-security-labels
 ```
 
 ---
@@ -89,3 +127,21 @@ scanning query text is fuzzy, not guaranteed — is documented in the access mat
 team and reviewed by Legal and HR. It cannot be generated because it encodes policy decisions
 (who should have what access, why) not just technical facts. A generated document signals
 that no human reviewed the policy — a red flag for compliance teams.
+
+**SECURITY LABELs are an optional, separate artifact.** The `anon` SECURITY LABELs depend on
+the PostgreSQL Anonymizer extension, which the shared Postgres image does not ship. Folding
+them into the core access-control script would make `apply-ddl` fail on a stock database, so
+they are generated into their own `security_labels.sql` and applied on demand. The functional
+masking — column-level grants plus the masked views — does not depend on `anon`.
+
+---
+
+## Known limitations
+
+- **SECURITY LABELs require PostgreSQL Anonymizer.** Generated into `security_labels.sql` and
+  applied via `make apply-security-labels`, not as part of `make setup`, because the shared
+  `pgvector/pgvector:pg16` image does not include `anon`.
+- **The audit scanner needs `pg_stat_statements` preloaded.** `CREATE EXTENSION
+  pg_stat_statements` (run by `apply-ddl`) only collects query history once the library is
+  added to Postgres's `shared_preload_libraries` and the server is restarted. Until then the
+  weekly `governance_audit` DAG has no statement history to scan.

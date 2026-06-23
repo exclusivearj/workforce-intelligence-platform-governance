@@ -27,6 +27,11 @@ def test_cli_writes_all_artifacts(tmp_path, monkeypatch):
     monkeypatch.chdir(repo_root)
 
     out = cli.main(output_dir=tmp_path)
-    assert set(out.keys()) == {"audit_setup.sql", "access_control.sql", "masking_views.sql"}
+    assert set(out.keys()) == {
+        "audit_setup.sql",
+        "access_control.sql",
+        "security_labels.sql",
+        "masking_views.sql",
+    }
     for path in out.values():
         assert pathlib.Path(path).read_text().strip()
