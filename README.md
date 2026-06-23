@@ -141,7 +141,9 @@ masking — column-level grants plus the masked views — does not depend on `an
 - **SECURITY LABELs require PostgreSQL Anonymizer.** Generated into `security_labels.sql` and
   applied via `make apply-security-labels`, not as part of `make setup`, because the shared
   `pgvector/pgvector:pg16` image does not include `anon`.
-- **The audit scanner needs `pg_stat_statements` preloaded.** `CREATE EXTENSION
-  pg_stat_statements` (run by `apply-ddl`) only collects query history once the library is
-  added to Postgres's `shared_preload_libraries` and the server is restarted. Until then the
-  weekly `governance_audit` DAG has no statement history to scan.
+- **The audit scanner relies on `pg_stat_statements`.** Postgres only collects query history
+  when the library is in `shared_preload_libraries`. The shared `docker-compose.yml` now
+  preloads it (`command: postgres -c shared_preload_libraries=pg_stat_statements`), and
+  `apply-ddl` runs `CREATE EXTENSION pg_stat_statements` to register the view. If you point the
+  module at a different Postgres, set the same startup flag there or the weekly
+  `governance_audit` DAG will have no statement history to scan.
