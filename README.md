@@ -9,6 +9,63 @@ column masking, access control DDL, and audit scanning for all People Analytics 
 
 ---
 
+## What this accomplishes
+
+### The problem
+
+People Analytics data is among the most sensitive data any company holds — salaries,
+performance ratings, terminations, names, emails. The access rules around it are real and
+specific (*"only HR Partners and Legal may read salary"*), but in most systems those rules
+live in a Confluence page nobody updates or a one-off SQL script someone ran two years ago.
+Neither tells you what the database is **actually** enforcing today, and both drift silently
+from reality.
+
+This module makes the policy **executable**. One YAML file is the single source of truth for
+every column's sensitivity, and Python codegen turns it into the Postgres objects that
+enforce it — so the documentation and the database physically cannot disagree.
+
+### What it delivers
+
+- **Classification as code** — every column in every analytics/LLM table is tagged
+  `public` / `internal` / `confidential` / `restricted` in one Pydantic-validated YAML file.
+- **Generated access control** — `GRANT` / `REVOKE` DDL that gives each role exactly the
+  columns it's allowed, with restricted columns (salary, performance) revoked from the base
+  table entirely.
+- **Masking views** — analyst-facing views that mask confidential PII (`full_name → '***'`,
+  `manager_id → MD5(...)`) and drop restricted columns, so even a `SELECT *` cannot leak them.
+- **Audit scanning** — a weekly Airflow DAG scans `pg_stat_statements` for access to
+  restricted columns by roles that shouldn't have it, and reports findings.
+- **A human-reviewed access matrix** — the policy decisions (who, what, *why*) signed off by
+  Legal/HR, kept deliberately hand-written next to the generated artifacts.
+
+### Why it matters
+
+Governance-as-code gives you three things a wiki never can:
+
+| Property | What it means | How this module provides it |
+|---|---|---|
+| **Auditability** | The policy is readable and reviewable | One version-controlled YAML file + a reviewable generated `git diff` |
+| **Enforceability** | The policy is actually applied | DDL the database runs — grants, revokes, masking views |
+| **Observability** | You can tell whether it's being followed | A weekly scan of real query history → findings report |
+
+Reclassify a column from `internal` to `restricted`, run one command, and the grants, the
+masked views, and the audit registry all update together. There is no second place to forget.
+
+### Use cases & impact
+
+- **Onboarding an analyst** — grant the `analyst_reader` role and they immediately see masked
+  views and never the raw salary column, *by construction* rather than by policy goodwill.
+- **Reclassifying a column** — Legal decides `manager_id` is now confidential; one YAML edit,
+  one `make apply-ddl`, and the change is enforced and recorded everywhere at once.
+- **Keeping LLMs safe** — only `public` / `internal` columns are LLM-eligible, so the
+  embedding/RAG pipeline (module 2) can't accidentally vectorize salary or performance data.
+- **Compliance sign-off** — a reviewer reads the access matrix and the YAML, not 30 scattered
+  SQL files, to confirm what the platform enforces.
+- **Catching drift** — the weekly DAG surfaces the day someone over-grants a role or queries a
+  restricted column they shouldn't have touched.
+
+---
+
 ## Architecture
 
 ```
@@ -133,6 +190,64 @@ the PostgreSQL Anonymizer extension, which the shared Postgres image does not sh
 them into the core access-control script would make `apply-ddl` fail on a stock database, so
 they are generated into their own `security_labels.sql` and applied on demand. The functional
 masking — column-level grants plus the masked views — does not depend on `anon`.
+
+---
+
+## Build vs. buy
+
+This is a solved problem commercially — data governance is a mature, crowded market, and a
+real company would almost certainly buy rather than build. The landscape, by category:
+
+- **Data-access / policy enforcement** — [Immuta](https://www.immuta.com/),
+  [Satori](https://satoricyber.com/), [Privacera](https://privacera.com/): dynamic masking,
+  attribute-based access control, runtime query interception, and access auditing.
+- **Discovery + privacy** — [BigID](https://bigid.com/), [OneTrust](https://www.onetrust.com/):
+  ML-based PII discovery, data-subject-access requests, regulatory compliance workflows.
+- **Catalogs + stewardship** — [Collibra](https://www.collibra.com/),
+  [Alation](https://www.alation.com/), [Atlan](https://atlan.com/): classification workflows,
+  lineage, and human approval flows.
+- **Warehouse-native** — Snowflake dynamic masking + row-access policies + tags, Databricks
+  Unity Catalog column masks / row filters: governance built into the platform you already pay for.
+- **Open-source / Postgres-native** (closest to this module) — `pgAudit` (audit logging),
+  PostgreSQL Anonymizer (masking), [Apache Ranger](https://ranger.apache.org/) (fine-grained
+  access policies).
+
+How this module compares to a typical commercial platform:
+
+| Capability | This module | Typical commercial platform |
+|---|---|---|
+| Classification source of truth | YAML in git, Pydantic-validated | UI / catalog, often ML-discovered |
+| PII discovery | Manual classification | Automated ML scanning |
+| Policy enforcement | Generated `GRANT`/`REVOKE` + masking views (plain DDL the DB runs) | Runtime policy engine, attribute-based, query proxy |
+| Masking | Static, view-based (`'***'`, `MD5(...)`, column drop) | Dynamic, role/attribute-aware, format-preserving |
+| Access audit | Weekly `pg_stat_statements` scan (fuzzy text match) | Real-time interception, tamper-evident logs |
+| Compliance reporting | Hand-written access matrix | Certified GDPR / CCPA / SOC 2 reports |
+| Cost / footprint | $0, runs on the existing Postgres | 5–6-figure licensing, often needs a cloud warehouse |
+| Transparency / lock-in | Every rule readable + diffable in git; none | Policies live in the vendor control plane |
+
+**Why this module is hand-built anyway.** The platform is a single self-hosted Postgres on a
+$0 budget; an enterprise governance SaaS is disproportionate to it — the licensing alone dwarfs
+the project, and most of these tools assume a cloud warehouse (Snowflake/Databricks) that this
+stack doesn't run. More to the point, re-implementing the core ideas — classification-driven
+policy, generated enforcement, masking, audit — demonstrates *how* governance actually works
+under the hood, which is the point of a portfolio. Wiring up a vendor's console would hide
+exactly the mechanics worth showing.
+
+**What building it yourself does add.** A few properties fall out of the code-generated approach
+that the managed tools trade away: **transparency** — every grant traces to a line of YAML, so a
+reviewer reads the policy itself rather than a vendor dashboard; **git-native change review** —
+the policy and the generated DDL are version-controlled and diffable, so a policy change *is* a
+code review; and **zero cost / zero lock-in** — it runs on the Postgres already in the stack and
+integrates natively with the platform's dbt + Airflow, with no separate control plane to operate.
+
+**When you'd reach for a vendor instead — and that's the honest answer.** For a funded team with
+a cloud warehouse, buying is the pragmatic call. Commercial platforms deliver things this layer
+deliberately doesn't: battle-tested runtime enforcement via true query interception (not the
+fuzzy log-scanning used here — the clearest gap, see [Known limitations](#known-limitations)
+below), ML-based PII discovery, attribute-based policies, and certified compliance reporting.
+This module is **not** a production replacement for Immuta, Satori, or Unity Catalog — it exists
+to demonstrate the concepts end-to-end and to keep the portfolio free and lock-in-free. Swapping
+in one of those tools is exactly what a real deployment with a budget should do.
 
 ---
 
