@@ -4,8 +4,7 @@
 
 Part 3 of 4 in the [workforce-intelligence-platform](../README.md).
 
-YAML-driven, code-generated data governance: sensitivity classification,
-column masking, access control DDL, and audit scanning for all People Analytics data.
+YAML-driven, code-generated data governance: sensitivity classification, column masking, access control DDL, and audit scanning for all People Analytics data. (Part 3 of 4)
 
 ---
 
